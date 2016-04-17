@@ -14,6 +14,11 @@ import re
 try:
   from picard import log
   inpicard = True
+
+  # The next bit is a truly horrific hack to let this script, running as a Picard
+  # plugin, access python packages installed at the system level (musicbrainzngs)
+  #
+  # It "works" on an OS X system with MacPorts.
   import sys
   sys.path = [ ]
   root = '/opt/local/Library/Frameworks/Python.framework/Versions/2.7/lib/'
