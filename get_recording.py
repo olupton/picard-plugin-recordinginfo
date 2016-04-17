@@ -16,32 +16,17 @@ def get_place_location_string(place_id):
     
     # Now walk up the name
     def check_area(area_id):
-        print "check_area(%s)"%(area_id)
         area_full_info = musicbrainzngs.get_area_by_id(area_id,
                 includes = ['area-rels'])['area']
         for area_rel in area_full_info['area-relation-list']:
+            # This type-id is "type of"
             if area_rel['type-id'] == 'de7cc874-8b1b-3a05-8272-f3834c968fb7' \
-                    and 'direction' in area_rel \
+                    and 'direction' in area_rel \ # only walk UP
                     and area_rel['direction'] == 'backward':
                 name_components.append(area_rel['area']['name'])
                 check_area(area_rel['area']['id'])
 
     check_area(place_full_info['area']['id'])
-    print name_components
-
-
-    name_components.append(place_full_info['area']['name']) # Islington
-    if 'disambiguation' in place_full_info \
-            and len(place_full_info['disambiguation']):
-        name_components.append(place_full_info['disambiguation']) # London
-        
-    place_countries = set()
-    for area_code in place_full_info['area']['iso-3166-2-code-list']:
-        # name, alpha2, alpha3
-        area = pycountry.subdivisions.get(code=area_code)
-        place_countries.add(area.country.alpha2) # GB
-    assert len(place_countries) == 1
-    name_components.append(list(place_countries)[0])
     place_location_string = ", ".join(name_components)
     get_place_location_string.cache[place_id] = place_location_string
     return place_location_string
