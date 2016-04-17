@@ -11,88 +11,108 @@ PLUGIN_LICENSE = "GPL-2.0"
 PLUGIN_LICENSE_URL = "https://www.gnu.org/licenses/gpl-2.0.html"
 
 import re
-from picard import log
-from picard.metadata import register_track_metadata_processor
-import sys
-sys.path = [ ]
-root = '/opt/local/Library/Frameworks/Python.framework/Versions/2.7/lib/'
-sys.path.append(root + 'python27.zip')
-root += 'python2.7'
-for x in ['','site-packages','lib-dynload', 'plat-darwin', 'plat-mac',
-        'plat-mac/lib-scriptpackages', 'lib-tk', 'lib-old','lib-dynload']:
-    p = root
-    if len(x):
-         p += '/' + x
-    sys.path.append(p)
+try:
+  from picard import log
+  inpicard = True
+  import sys
+  sys.path = [ ]
+  root = '/opt/local/Library/Frameworks/Python.framework/Versions/2.7/lib/'
+  sys.path.append(root + 'python27.zip')
+  root += 'python2.7'
+  for x in ['','site-packages','lib-dynload', 'plat-darwin', 'plat-mac',
+          'plat-mac/lib-scriptpackages', 'lib-tk', 'lib-old','lib-dynload']:
+      p = root
+      if len(x):
+           p += '/' + x
+      sys.path.append(p)
+except ImportError:
+  import logging as log
+  inpicard = False
 
-
-for x in sys.path:
-    print x
-
-import musicbrainzngs, pycountry
+import musicbrainzngs
 musicbrainzngs.set_useragent("extra_relationships", PLUGIN_VERSION,\
         "extra_relationships")
 
 def get_place_location_string(place_id):
+    log.debug("%s: get_place_location_string cache size %d", PLUGIN_NAME,
+            len(get_place_location_string.cache))
     if place_id in get_place_location_string.cache:
         return get_place_location_string.cache[place_id]
 
-    place_full_info = musicbrainzngs.get_place_by_id(place_id)['place']
-    name_components = [ ]
-    name_components.append(place_full_info['name']) # Union Chapel
-    name_components.append(place_full_info['area']['name']) # Islington
-    if 'disambiguation' in place_full_info \
-            and len(place_full_info['disambiguation']):
-        name_components.append(place_full_info['disambiguation']) # London
-        
-    place_countries = set()
-    try:
-        for area_code in place_full_info['area']['iso-3166-2-code-list']:
-            # name, alpha2, alpha3
-            area = pycountry.subdivisions.get(code=area_code)
-            place_countries.add(area.country.alpha2) # GB
-    except:
-        print "Couldn't loop over country codes."
-        print "place_full_info:"
-        print place_full_info
-        raise
-    assert len(place_countries) == 1
-    name_components.append(list(place_countries)[0])
-    place_location_string = ", ".join(name_components)
+    place_full_info = musicbrainzngs.get_place_by_id(place_id,
+            includes = ['area-rels'])['place']
+    name_components = [
+            place_full_info['name'], # Union Chapel
+            place_full_info['area']['name'], # Islington
+            ]
+    
+    # Now walk up the name
+    def check_area(area_id):
+        area_full_info = musicbrainzngs.get_area_by_id(area_id,
+                includes = ['area-rels'])['area']
+        for area_rel in area_full_info['area-relation-list']:
+            # This type-id is "type of"
+            if area_rel['type-id'] == 'de7cc874-8b1b-3a05-8272-f3834c968fb7' \
+                    and 'direction' in area_rel \
+                    and area_rel['direction'] == 'backward':
+                name_components.append(area_rel['area']['name'])
+                check_area(area_rel['area']['id'])
+
+    check_area(place_full_info['area']['id'])
+
+    def remove_seq_dupes(seq):
+      newseq = [ ]
+      for x in seq:
+        if len(newseq) == 0 or newseq[-1] != x:
+          newseq.append(x)
+      return newseq
+
+    place_location_string = ", ".join(remove_seq_dupes(name_components))
     get_place_location_string.cache[place_id] = place_location_string
     return place_location_string
 get_place_location_string.cache = { }
 
 def get_recording_live_string(recording_id):
+    log.debug("%s: get_recording_live_string cache size %d", PLUGIN_NAME,
+            len(get_recording_live_string.cache))
+    if recording_id in get_recording_live_string.cache:
+        return get_recording_live_string.cache[recording_id]
+
     recording_info = musicbrainzngs.get_recording_by_id(recording_id,
             includes = ['work-rels', 'place-rels'])['recording']
     live = False
-    for work_rel in recording_info['work-relation-list']:
-        for work_rel_attrib in work_rel['attribute-list']:
-            if work_rel_attrib == 'live':
-                live = True
-                break
+    try:
+      for work_rel in recording_info['work-relation-list']:
+          for work_rel_attrib in work_rel['attribute-list']:
+              if work_rel_attrib == 'live':
+                  live = True
+                  break
+    except:
+      pass
+
     if live:
         assert len(recording_info['place-relation-list']) == 1
         for place_rel in recording_info['place-relation-list']:
             assert place_rel['begin'] == place_rel['end']
             location_string = get_place_location_string(place_rel['place']['id'])
             live_loc_str = "live, %s: %s"%(place_rel['begin'], location_string)
+            get_recording_live_string.cache[recording_id] = live_loc_str
             return live_loc_str
+    return None
+get_recording_live_string.cache = { }
 
 def extra_relationships(album, metadata, *args):
     recording_id = metadata['musicbrainz_recordingid']
     recording_live_string = get_recording_live_string(recording_id)
-    log.debug("%s: recording id %s -> %s (%s)", PLUGIN_NAME, recording_id,
-            recording_live_string, metadata['disambiguation'])
-        #          )
-        #for instrument in instruments:
-        #    newkey = '%s:%s' % (mainkey, instrument)
-        #    for value in values:
-        #        metadata.add_unique(newkey, value)
-        #del metadata[key]
-        #pass
+    if recording_live_string:
+        old_comment = metadata.get('~recordingcomment', None)
+        log.debug("%s: recording id %s -> %s (%s)", PLUGIN_NAME, recording_id,
+                recording_live_string, old_comment)
+        metadata.add_unique('~recordinglivecomment', recording_live_string)
 
-log.debug("%s: initalising...", PLUGIN_NAME)
-from picard.plugin import PluginPriority
-register_track_metadata_processor(extra_relationships)
+if inpicard:
+  log.debug("%s: initalising...", PLUGIN_NAME)
+  from picard.metadata import register_track_metadata_processor
+  from picard.plugin import PluginPriority
+  register_track_metadata_processor(extra_relationships,
+          priority = PluginPriority.HIGH)
