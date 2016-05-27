@@ -86,32 +86,45 @@ def get_recording_live_string(recording_id):
     recording_info = musicbrainzngs.get_recording_by_id(recording_id,
             includes = ['work-rels', 'place-rels'])['recording']
     live = False
-    try:
-      for work_rel in recording_info['work-relation-list']:
-          for work_rel_attrib in work_rel['attribute-list']:
-              if work_rel_attrib == 'live':
-                  live = True
-                  break
-    except:
-      pass
+    if 'disambiguation' in recording_info \
+        and 'live' in recording_info['disambiguation']:
+        live = True
+    else:
+        try:
+            for work_rel in recording_info['work-relation-list']:
+                for work_rel_attrib in work_rel['attribute-list']:
+                    if work_rel_attrib == 'live':
+                        live = True
+                        break
+        except:
+            pass
 
-    if live:
-        assert len(recording_info['place-relation-list']) == 1
+    place_strings = [ ]
+    if 'place-relation-list' in recording_info:
+        #assert len(recording_info['place-relation-list']) == 1
         for place_rel in recording_info['place-relation-list']:
-            assert place_rel['begin'] == place_rel['end']
-            location_string = get_place_location_string(place_rel['place']['id'])
-            live_loc_str = "live, %s: %s"%(place_rel['begin'], location_string)
-            get_recording_live_string.cache[recording_id] = live_loc_str
-            return live_loc_str
+            try:
+              assert place_rel['begin'] == place_rel['end']
+              if len(place_rel['begin']):
+                location_string = get_place_location_string(place_rel['place']['id'])
+                live_loc_str = "live, " if live else "recorded, "
+                live_loc_str += "%s: %s"%(place_rel['begin'], location_string)
+                get_recording_live_string.cache[recording_id] = live_loc_str
+                place_strings.append(live_loc_str)
+            except:
+              log.debug("Got confused by %s", repr(place_rel))
+              pass
+        place_strings.sort()
+        return '; '.join(place_strings)
     return None
 get_recording_live_string.cache = { }
 
-def extra_relationships(album, metadata, *args):
+def extra_relationships(tagger, metadata, release, track):
     recording_id = metadata['musicbrainz_recordingid']
     recording_live_string = get_recording_live_string(recording_id)
     if recording_live_string:
         old_comment = metadata.get('~recordingcomment', None)
-        log.debug("%s: recording id %s -> %s (%s)", PLUGIN_NAME, recording_id,
+        log.info("%s: recording id %s -> %s (%s)", PLUGIN_NAME, recording_id,
                 recording_live_string, old_comment)
         metadata.add_unique('~recordinglivecomment', recording_live_string)
 
