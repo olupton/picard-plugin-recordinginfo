@@ -1,7 +1,5 @@
 import musicbrainzngs, pycountry
 musicbrainzngs.set_useragent("recording_id_test", "0.1", "ol")
-recording_id = '2bc4d989-3ce4-4409-8cbd-b662a0cf0714'
-recording_id = 'd266ab68-2ec5-4b92-b788-e03b5afe57cf'
 
 def get_place_location_string(place_id):
     if place_id in get_place_location_string.cache:
@@ -48,5 +46,3 @@ def get_recording_live_string(recording_id):
             location_string = get_place_location_string(place_rel['place']['id'])
             live_loc_str = "live, %s: %s"%(place_rel['begin'], location_string)
             return live_loc_str
-
-print get_recording_live_string(recording_id)
